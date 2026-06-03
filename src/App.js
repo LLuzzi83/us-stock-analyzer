@@ -35,123 +35,83 @@ function fmtCurrency(v) {
 
 // ── Yahoo Finance via proxy ───────────────────────────────────────
 async function fetchYahooData(ticker) {
-  // Tenta primeiro a Netlify Function, depois fallback direto
   const endpoints = [
     `/api/yahoo?ticker=${encodeURIComponent(ticker)}`,
     `/.netlify/functions/yahoo?ticker=${encodeURIComponent(ticker)}`,
   ];
-
   let lastErr = "";
   for (const endpoint of endpoints) {
     try {
-      const res = await fetch(endpoint, { signal: AbortSignal.timeout(15000) });
+      const res = await fetch(endpoint, { signal: AbortSignal.timeout(20000) });
       const json = await res.json();
-      if (json.error) {
-        lastErr = json.error + (json.debug ? ` [debug: ${json.debug}]` : "");
-        continue;
-      }
-      const r = json.quoteSummary?.result?.[0];
-      if (r) return r;
-      lastErr = "Estrutura de dados inesperada: " + JSON.stringify(Object.keys(json));
-    } catch(e) {
-      lastErr = e.message;
-      continue;
-    }
+      if (json.error) { lastErr = json.error; continue; }
+      if (json.unified) return json.unified;
+      lastErr = "Formato inesperado: " + JSON.stringify(Object.keys(json));
+    } catch(e) { lastErr = e.message; }
   }
   throw new Error(`Falha ao buscar ${ticker}: ${lastErr}`);
 }
 
-function extractMetrics(r) {
-  const price     = r.price || {};
-  const summary   = r.summaryDetail || {};
-  const keyStats  = r.defaultKeyStatistics || {};
-  const finData   = r.financialData || {};
-  const profile   = r.assetProfile || {};
-
-  const currentPrice  = price.regularMarketPrice?.raw;
-  const prevClose     = price.regularMarketPreviousClose?.raw;
-  const change1d      = currentPrice && prevClose ? ((currentPrice - prevClose) / prevClose * 100) : null;
+function extractMetrics(u) {
+  // u = unified object from Netlify function
+  const currentPrice = u.regularMarketPrice;
+  const prevClose    = u.regularMarketPreviousClose;
+  const change1d     = currentPrice && prevClose ? ((currentPrice - prevClose) / prevClose * 100) : null;
 
   return {
-    // Identity
-    company:    price.longName || price.shortName || "",
-    sector:     profile.sector || "",
-    industry:   profile.industry || "",
-    description: profile.longBusinessSummary || "",
-    website:    profile.website || "",
-    employees:  profile.fullTimeEmployees?.toLocaleString() || "N/A",
+    company:     u.longName || u.shortName || "",
+    sector:      u.sector   || "",
+    industry:    u.industry || "",
+    description: u.longBusinessSummary || "",
 
-    // Price
-    price:      currentPrice ? `$${currentPrice.toFixed(2)}` : "N/A",
-    change1d:   change1d,
-    market_cap: fmtCurrency(price.marketCap?.raw),
-    volume:     price.regularMarketVolume?.raw?.toLocaleString() || "N/A",
-    avg_volume: price.averageVolume?.raw?.toLocaleString() || "N/A",
-    week52_high: currentPrice ? `$${summary.fiftyTwoWeekHigh?.raw?.toFixed(2)}` : "N/A",
-    week52_low:  currentPrice ? `$${summary.fiftyTwoWeekLow?.raw?.toFixed(2)}` : "N/A",
+    price:       currentPrice ? `$${currentPrice.toFixed(2)}` : "N/A",
+    change1d,
+    market_cap:  fmtCurrency(u.marketCap),
+    volume:      u.regularMarketVolume?.toLocaleString() || "N/A",
+    avg_volume:  u.averageVolume?.toLocaleString()       || "N/A",
+    week52_high: u.fiftyTwoWeekHigh ? `$${u.fiftyTwoWeekHigh.toFixed(2)}` : "N/A",
+    week52_low:  u.fiftyTwoWeekLow  ? `$${u.fiftyTwoWeekLow.toFixed(2)}`  : "N/A",
 
-    // Valuation
-    pe:           fmt(summary.trailingPE?.raw, "x"),
-    forward_pe:   fmt(summary.forwardPE?.raw, "x"),
-    peg:          fmt(keyStats.pegRatio?.raw),
-    pb:           fmt(keyStats.priceToBook?.raw, "x"),
-    ps:           fmt(keyStats.priceToSalesTrailing12Months?.raw ?? summary.priceToSalesTrailing12Months?.raw, "x"),
-    price_fcf:    "N/A",
-    ev_ebitda:    fmt(keyStats.enterpriseToEbitda?.raw, "x"),
-    ev_fcf:       "N/A",
-    ev:           fmtCurrency(keyStats.enterpriseValue?.raw),
+    pe:         fmt(u.trailingPE,    "x"),
+    forward_pe: fmt(u.forwardPE,     "x"),
+    peg:        fmt(u.pegRatio),
+    pb:         fmt(u.priceToBook,   "x"),
+    ps:         fmt(u.priceToSales,  "x"),
+    ev_ebitda:  fmt(u.evToEbitda,    "x"),
+    ev:         fmtCurrency(u.enterpriseValue),
 
-    // Profitability
-    roe:          fmtPct(finData.returnOnEquity?.raw),
-    roa:          fmtPct(finData.returnOnAssets?.raw),
-    roic:         "N/A",
-    gross_margin: fmtPct(finData.grossMargins?.raw),
-    op_margin:    fmtPct(finData.operatingMargins?.raw),
-    net_margin:   fmtPct(finData.profitMargins?.raw),
-    ebitda_margin: "N/A",
-    fcf_yield:    "N/A",
-    asset_turnover: "N/A",
+    roe:          fmtPct(u.returnOnEquity),
+    roa:          fmtPct(u.returnOnAssets),
+    gross_margin: fmtPct(u.grossMargins),
+    op_margin:    fmtPct(u.operatingMargins),
+    net_margin:   fmtPct(u.profitMargins),
+    revenue_ttm:  fmtCurrency(u.totalRevenue),
 
-    // Growth
-    revenue_growth:   fmtPct(finData.revenueGrowth?.raw),
-    earnings_growth:  fmtPct(finData.earningsGrowth?.raw),
-    eps_ttm:          fmt(keyStats.trailingEps?.raw),
-    eps_forward:      fmt(keyStats.forwardEps?.raw),
-    eps_growth:       fmtPct(finData.earningsGrowth?.raw),
-    revenue_ttm:      fmtCurrency(finData.totalRevenue?.raw),
+    revenue_growth:  fmtPct(u.revenueGrowth),
+    earnings_growth: fmtPct(u.earningsGrowth),
+    eps_ttm:         u.trailingEps ? `$${fmt(u.trailingEps)}` : "N/A",
+    eps_forward:     u.forwardEps  ? `$${fmt(u.forwardEps)}`  : "N/A",
 
-    // Dividends
-    dy:           fmtPct(summary.dividendYield?.raw ?? summary.trailingAnnualDividendYield?.raw),
-    div_rate:     fmt(summary.dividendRate?.raw),
-    payout:       fmtPct(summary.payoutRatio?.raw),
-    div_years:    "N/A",
-    div_cagr_5y:  "N/A",
-    buyback_yield: "N/A",
-    total_shareholder_yield: "N/A",
-    ex_div_date:  summary.exDividendDate?.fmt || "N/A",
+    dy:          fmtPct(u.dividendYield),
+    div_rate:    u.dividendRate ? `$${fmt(u.dividendRate)}` : "N/A",
+    payout:      fmtPct(u.payoutRatio),
+    ex_div_date: u.exDividendDate || "N/A",
 
-    // Health
-    current_ratio:     fmt(finData.currentRatio?.raw),
-    quick_ratio:       fmt(finData.quickRatio?.raw),
-    debt_equity:       fmt(finData.debtToEquity?.raw),
-    total_debt:        fmtCurrency(finData.totalDebt?.raw),
-    total_cash:        fmtCurrency(finData.totalCash?.raw),
-    interest_coverage: "N/A",
-    altman_z:          "N/A",
+    current_ratio: fmt(u.currentRatio),
+    quick_ratio:   fmt(u.quickRatio),
+    debt_equity:   fmt(u.debtToEquity),
+    total_debt:    fmtCurrency(u.totalDebt),
+    total_cash:    fmtCurrency(u.totalCash),
 
-    // Analyst
-    analyst_target:    finData.targetMeanPrice?.raw ? `$${finData.targetMeanPrice.raw.toFixed(2)}` : "N/A",
-    analyst_low:       finData.targetLowPrice?.raw  ? `$${finData.targetLowPrice.raw.toFixed(2)}`  : "N/A",
-    analyst_high:      finData.targetHighPrice?.raw ? `$${finData.targetHighPrice.raw.toFixed(2)}` : "N/A",
-    analyst_consensus: finData.recommendationKey?.raw
-      ? finData.recommendationKey.raw.toUpperCase()
-      : "N/A",
-    analyst_count:     finData.numberOfAnalystOpinions?.raw || "N/A",
+    analyst_target:    u.targetMeanPrice ? `$${u.targetMeanPrice.toFixed(2)}` : "N/A",
+    analyst_low:       u.targetLowPrice  ? `$${u.targetLowPrice.toFixed(2)}`  : "N/A",
+    analyst_high:      u.targetHighPrice ? `$${u.targetHighPrice.toFixed(2)}` : "N/A",
+    analyst_consensus: u.recommendationKey ? u.recommendationKey.toUpperCase() : "N/A",
+    analyst_count:     u.numberOfAnalystOpinions || "N/A",
 
-    // Risk
-    beta:          fmt(summary.beta?.raw),
-    short_interest: fmtPct(keyStats.shortPercentOfFloat?.raw),
-    short_ratio:    fmt(keyStats.shortRatio?.raw),
+    beta:          fmt(u.beta),
+    short_interest: fmtPct(u.shortPercentFloat),
+    short_ratio:    fmt(u.shortRatio),
   };
 }
 
