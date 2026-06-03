@@ -58,8 +58,8 @@ function parseAnalysis(text) {
 function buildPrompt(sym) {
   const today = new Date().toLocaleDateString("pt-BR", { day:"2-digit", month:"short", year:"numeric" });
   const time  = new Date().toLocaleTimeString("pt-BR", { hour:"2-digit", minute:"2-digit" });
-  return `Busque dados atuais de ${sym} e retorne APENAS este JSON preenchido (sem texto extra):
-{"ticker":"${sym}","company":"","sector":"","industry":"","description":"","price":"","price_time":"${time} BRT","market_cap":"","last_updated":"${today}","scores":{"valuation":0,"health":0,"growth":0,"dividends":0,"overall":0},"metrics":{"pe":"","forward_pe":"","peg":"","pb":"","ps":"","ev_ebitda":"","roe":"","roic":"","net_margin":"","gross_margin":"","dy":"","div_years":"","payout":"","revenue_growth":"","eps_growth":"","debt_equity":"","current_ratio":"","beta":"","analyst_target":"","analyst_consensus":"","week52_high":"","week52_low":"","eps_ttm":""},"fair_value":{"method":"","estimate":"","upside":""},"strengths":["","",""],"risks":["","",""],"moat":"","outlook":"","recommendation":"","recommendation_reason":""}`;
+  return `Search the web RIGHT NOW for current ${sym} stock data and fill this JSON. Use ONLY real current values found via web search. Return ONLY valid JSON, nothing else:
+{"ticker":"${sym}","company":"","sector":"","industry":"","description":"2 line business description","price":"current price like $195.50","price_time":"${time} BRT","market_cap":"like $3.1T","last_updated":"${today}","scores":{"valuation":0,"health":0,"growth":0,"dividends":0,"overall":0},"metrics":{"pe":"like 31.2x","forward_pe":"like 27.5x","peg":"like 2.1x","pb":"like 8.4x","ps":"like 7.2x","ev_ebitda":"like 23.1x","roe":"like 145%","roic":"like 35%","net_margin":"like 26%","gross_margin":"like 46%","dy":"like 0.5%","div_years":"like 12 anos","payout":"like 15%","revenue_growth":"like +12%","eps_growth":"like +15%","debt_equity":"like 1.87","current_ratio":"like 1.07","beta":"like 1.24","analyst_target":"like $230.00","analyst_consensus":"like 85% Buy","week52_high":"like $237.23","week52_low":"like $169.21","eps_ttm":"like $6.43"},"fair_value":{"method":"DCF + peer multiples","estimate":"like $210-$230","upside":"like +12%"},"strengths":["s1","s2","s3"],"risks":["r1","r2","r3"],"moat":"moat description","outlook":"3 line outlook","recommendation":"COMPRAR","recommendation_reason":"1 line reason"}`;
 }
 
 
@@ -84,9 +84,10 @@ async function callClaude(apiKey, prompt) {
     throw new Error(err?.error?.message || `Erro ${res.status}`);
   }
   const json = await res.json();
-  const text = json.content
-    .map(b => b.type === "text" ? b.text : "")
-    .filter(Boolean)
+  // Only collect text blocks — ignore tool_use/tool_result blocks
+  const text = (json.content || [])
+    .filter(b => b.type === "text")
+    .map(b => b.text)
     .join("\n");
   return text;
 }
