@@ -35,15 +35,27 @@ function fmtCurrency(v) {
 
 // ── Yahoo Finance via proxy ───────────────────────────────────────
 async function fetchYahooData(ticker) {
-  // Chama a Netlify Function local — sem problemas de CORS
-  const res = await fetch(`/api/yahoo?ticker=${encodeURIComponent(ticker)}`, {
-    signal: AbortSignal.timeout(15000),
-  });
-  const json = await res.json();
-  if (!res.ok || json.error) throw new Error(json.error || "Erro ao buscar dados");
-  const r = json.quoteSummary?.result?.[0];
-  if (!r) throw new Error("Sem dados para " + ticker);
-  return r;
+  // Tenta primeiro a Netlify Function, depois fallback direto
+  const endpoints = [
+    `/api/yahoo?ticker=${encodeURIComponent(ticker)}`,
+    `/.netlify/functions/yahoo?ticker=${encodeURIComponent(ticker)}`,
+  ];
+
+  let lastErr = "";
+  for (const endpoint of endpoints) {
+    try {
+      const res = await fetch(endpoint, { signal: AbortSignal.timeout(15000) });
+      const json = await res.json();
+      if (json.error) { lastErr = json.error; continue; }
+      const r = json.quoteSummary?.result?.[0];
+      if (r) return r;
+      lastErr = "Resposta vazia do servidor";
+    } catch(e) {
+      lastErr = e.message;
+      continue;
+    }
+  }
+  throw new Error(`Falha ao buscar ${ticker}: ${lastErr}. Verifique se a Netlify Function foi publicada em Site → Functions.`);
 }
 
 function extractMetrics(r) {
