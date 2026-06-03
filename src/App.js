@@ -82,11 +82,22 @@ function Spinner({ size = 16 }) {
 }
 
 function parseAnalysis(text) {
-  try {
-    const m = text.match(/```json\n?([\s\S]*?)\n?```/);
-    if (m) return JSON.parse(m[1]);
-    return JSON.parse(text.replace(/```json|```/g,"").trim());
-  } catch { return null; }
+  if (!text) return null;
+  // 1. Try ```json ... ``` fenced block
+  const fenced = text.match(/```json\s*([\s\S]*?)\s*```/);
+  if (fenced) { try { return JSON.parse(fenced[1]); } catch {} }
+  // 2. Try ``` ... ``` block without language tag
+  const fenced2 = text.match(/```\s*([\s\S]*?)\s*```/);
+  if (fenced2) { try { return JSON.parse(fenced2[1]); } catch {} }
+  // 3. Extract first { ... } block (handles thinking model output)
+  const braceStart = text.indexOf("{");
+  const braceEnd   = text.lastIndexOf("}");
+  if (braceStart !== -1 && braceEnd !== -1 && braceEnd > braceStart) {
+    try { return JSON.parse(text.slice(braceStart, braceEnd + 1)); } catch {}
+  }
+  // 4. Fallback: strip markdown and parse full text
+  try { return JSON.parse(text.replace(/```json|```/g,"").trim()); } catch {}
+  return null;
 }
 
 function buildPrompt(sym) {
@@ -165,10 +176,10 @@ async function callGemini(apiKey, prompt) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
-      tools: [{ google_search: {} }],
       generationConfig: {
-        temperature: 0.2,
-        maxOutputTokens: 2048,
+        temperature: 0.1,
+        maxOutputTokens: 4096,
+        responseMimeType: "application/json",
       },
     }),
   });
@@ -178,9 +189,14 @@ async function callGemini(apiKey, prompt) {
     throw new Error(msg);
   }
   const json = await res.json();
-  // Extract text from response parts
+  // gemini-2.5-flash may include "thought" parts — extract only text parts
   const parts = json?.candidates?.[0]?.content?.parts || [];
-  return parts.map(p => p.text || "").filter(Boolean).join("\n");
+  const text = parts
+    .filter(p => p.text && !p.thought)
+    .map(p => p.text)
+    .join("\n");
+  // responseMimeType=json means the text IS the JSON
+  return text || parts.map(p => p.text || "").filter(Boolean).join("\n");
 }
 
 // ── API Key Setup Screen ──────────────────────────────────────────
