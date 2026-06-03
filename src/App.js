@@ -57,87 +57,8 @@ function parseAnalysis(text) {
 
 function buildPrompt(sym) {
   const today = new Date().toLocaleDateString("pt-BR", { day:"2-digit", month:"short", year:"numeric" });
-  return `Você é um analista fundamentalista especializado em ações americanas. Hoje é ${today}.
-
-Analise a ação ${sym} buscando dados ATUAIS e retorne APENAS um JSON válido (sem texto fora do JSON):
-
-{
-  "ticker": "${sym}",
-  "company": "nome completo",
-  "sector": "setor",
-  "industry": "subsetor",
-  "description": "descrição do negócio em 2 linhas",
-  "price": "preço atual ex: $189.50",
-  "market_cap": "ex: $2.1T",
-  "last_updated": "${today}",
-  "scores": {
-    "valuation": 7,
-    "health": 8,
-    "growth": 6,
-    "dividends": 5,
-    "overall": 7
-  },
-  "metrics": {
-    "pe": "ex: 28.5x",
-    "forward_pe": "ex: 24.2x",
-    "peg": "ex: 1.8x",
-    "pb": "ex: 4.2x",
-    "ps": "ex: 6.1x",
-    "price_fcf": "ex: 22.3x",
-    "ev_ebitda": "ex: 18.4x",
-    "ev_fcf": "ex: 25.1x",
-    "roe": "ex: 32.5%",
-    "roic": "ex: 18.2%",
-    "roa": "ex: 12.1%",
-    "asset_turnover": "ex: 0.85",
-    "interest_coverage": "ex: 12.3x",
-    "altman_z": "ex: 4.2",
-    "gross_margin": "ex: 43.2%",
-    "op_margin": "ex: 29.1%",
-    "net_margin": "ex: 25.1%",
-    "fcf_yield": "ex: 3.8%",
-    "dy": "ex: 1.8%",
-    "div_cagr_5y": "ex: 5.2%",
-    "div_years": "ex: 12 anos",
-    "buyback_yield": "ex: 2.1%",
-    "total_shareholder_yield": "ex: 3.9%",
-    "payout": "ex: 28%",
-    "revenue_growth": "ex: +12.3%",
-    "eps_growth": "ex: +18.5%",
-    "earnings_surprise": "ex: +4.2% acima do consenso",
-    "debt_equity": "ex: 0.45",
-    "current_ratio": "ex: 1.8",
-    "quick_ratio": "ex: 1.2",
-    "total_debt": "ex: $110B",
-    "total_cash": "ex: $65B",
-    "analyst_target": "ex: $230.00",
-    "analyst_low": "ex: $180.00",
-    "analyst_high": "ex: $275.00",
-    "analyst_consensus": "ex: 78% Buy · 18% Hold · 4% Sell",
-    "analyst_count": "ex: 42",
-    "beta": "ex: 1.15",
-    "short_interest": "ex: 0.8%",
-    "week52_high": "ex: $237.23",
-    "week52_low": "ex: $164.08",
-    "eps_ttm": "ex: $6.43",
-    "eps_forward": "ex: $7.21",
-    "revenue_ttm": "ex: $391B",
-    "ex_div_date": "ex: 08/Nov/2024"
-  },
-  "fair_value": {
-    "method": "ex: DCF + múltiplos setoriais",
-    "estimate": "ex: $195–$220",
-    "current_vs_fair": "ex: 8% abaixo do valor justo",
-    "upside": "ex: +12%"
-  },
-  "strengths": ["ponto forte 1", "ponto forte 2", "ponto forte 3"],
-  "risks": ["risco 1", "risco 2", "risco 3"],
-  "dividend_history": "descrição da consistência histórica",
-  "moat": "descrição do fosso competitivo",
-  "outlook": "perspectiva para médio e longo prazo em 3 linhas",
-  "recommendation": "COMPRAR",
-  "recommendation_reason": "motivo em 1 linha"
-}`;
+  return `Analise a ação ${sym} (${today}) e retorne APENAS JSON válido:
+{"ticker":"${sym}","company":"","sector":"","industry":"","description":"","price":"","market_cap":"","last_updated":"${today}","scores":{"valuation":0,"health":0,"growth":0,"dividends":0,"overall":0},"metrics":{"pe":"","forward_pe":"","peg":"","pb":"","ps":"","price_fcf":"","ev_ebitda":"","ev_fcf":"","roe":"","roic":"","roa":"","asset_turnover":"","interest_coverage":"","altman_z":"","gross_margin":"","op_margin":"","net_margin":"","fcf_yield":"","dy":"","div_cagr_5y":"","div_years":"","buyback_yield":"","total_shareholder_yield":"","payout":"","revenue_growth":"","eps_growth":"","earnings_surprise":"","debt_equity":"","current_ratio":"","quick_ratio":"","total_debt":"","total_cash":"","analyst_target":"","analyst_low":"","analyst_high":"","analyst_consensus":"","analyst_count":"","beta":"","short_interest":"","week52_high":"","week52_low":"","eps_ttm":"","eps_forward":"","revenue_ttm":"","ex_div_date":""},"fair_value":{"method":"","estimate":"","current_vs_fair":"","upside":""},"strengths":["","",""],"risks":["","",""],"dividend_history":"","moat":"","outlook":"","recommendation":"COMPRAR","recommendation_reason":""}`;
 }
 
 async function callClaude(apiKey, prompt) {
@@ -322,10 +243,7 @@ export default function StockAnalyzer() {
   const fetchAnalysis = useCallback(async (sym) => {
     const text   = await callClaude(apiKey, buildPrompt(sym));
     const parsed = parseAnalysis(text);
-    if (!parsed) {
-      // Mostra os primeiros 300 chars da resposta para debug
-      throw new Error("Não foi possível estruturar os dados. Resposta recebida: " + (text || "vazia").slice(0, 300));
-    }
+    if (!parsed) throw new Error("Não foi possível estruturar os dados. Tente novamente.");
     return parsed;
   }, [apiKey]);
 
