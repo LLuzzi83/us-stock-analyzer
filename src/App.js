@@ -46,16 +46,19 @@ async function fetchYahooData(ticker) {
     try {
       const res = await fetch(endpoint, { signal: AbortSignal.timeout(15000) });
       const json = await res.json();
-      if (json.error) { lastErr = json.error; continue; }
+      if (json.error) {
+        lastErr = json.error + (json.debug ? ` [debug: ${json.debug}]` : "");
+        continue;
+      }
       const r = json.quoteSummary?.result?.[0];
       if (r) return r;
-      lastErr = "Resposta vazia do servidor";
+      lastErr = "Estrutura de dados inesperada: " + JSON.stringify(Object.keys(json));
     } catch(e) {
       lastErr = e.message;
       continue;
     }
   }
-  throw new Error(`Falha ao buscar ${ticker}: ${lastErr}. Verifique se a Netlify Function foi publicada em Site → Functions.`);
+  throw new Error(`Falha ao buscar ${ticker}: ${lastErr}`);
 }
 
 function extractMetrics(r) {
