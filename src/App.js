@@ -284,7 +284,6 @@ export default function StockAnalyzer() {
   if (!apiKey) return <ApiKeySetup onSave={setApiKey} />;
 
   const m = data?.metrics || {};
-        const priceTime = data?.price_time || "";
   const tabs = ["overview","valuation","dividendos","risco","perspectiva"];
 
   return (
@@ -401,7 +400,6 @@ export default function StockAnalyzer() {
               const vsTeto    = priceNum && ceilPrice? ((priceNum - ceilPrice)/ ceilPrice* 100) : null;
 
               const pctColor = (v) => v === null ? "#4a6a8a" : v <= -10 ? "#00d68f" : v <= 0 ? "#7cc987" : v <= 10 ? "#ffaa00" : "#ff4d6d";
-              const pctLabel = (v, prefix="vs") => v === null ? "N/A" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
 
               return (
                 <div style={{ background:"linear-gradient(135deg,#0d1b2a,#0a2236)", border:"1px solid #1e3a5a", borderRadius:14, padding:"24px 28px", marginBottom:16 }}>
