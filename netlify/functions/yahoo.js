@@ -42,6 +42,18 @@ exports.handler = async function (event) {
     "Cache-Control": "no-cache",
   };
 
+  // Debug: log se a chave chegou
+  if (!fmpKey) {
+    return {
+      statusCode: 400,
+      headers: cors,
+      body: JSON.stringify({ 
+        error: "Chave FMP não encontrada. Configure FMP_API_KEY no Netlify ou passe via parâmetro fmpkey.",
+        debug_env: Object.keys(process.env).filter(k => k.includes("FMP")),
+      }),
+    };
+  }
+
   try {
     // ── FMP endpoints ─────────────────────────────────────────────
     const base = "https://financialmodelingprep.com/api/v3";
