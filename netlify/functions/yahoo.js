@@ -8,25 +8,45 @@ function get(url, headers) {
       }
       let body = "";
       res.on("data", c => body += c);
-      res.on("end", () => resolve({ status: res.statusCode, body }));
+      res.on("end", () => resolve({ status: res.statusCode, body, headers: res.headers }));
     });
     req.on("error", reject);
     req.setTimeout(12000, () => { req.destroy(); reject(new Error("Timeout")); });
   });
 }
 
-const HEADERS = {
+const BASE_HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  "Accept": "application/json",
+  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
   "Accept-Language": "en-US,en;q=0.9",
   "Accept-Encoding": "identity",
-  "Referer": "https://finance.yahoo.com/",
 };
 
-async function tryFetch(url) {
-  const { status, body } = await get(url, HEADERS);
-  if (status !== 200) return null;
-  try { return JSON.parse(body); } catch { return null; }
+// Step 1: get cookie from Yahoo Finance homepage
+async function getCookie() {
+  const r = await get("https://finance.yahoo.com/", BASE_HEADERS);
+  const setCookie = r.headers["set-cookie"] || [];
+  const cookie = setCookie.map(c => c.split(";")[0]).join("; ");
+  return cookie || "";
+}
+
+// Step 2: get crumb using the cookie
+async function getCrumb(cookie) {
+  const r = await get("https://query1.finance.yahoo.com/v1/test/getcrumb", {
+    ...BASE_HEADERS,
+    "Accept": "text/plain, */*",
+    "Cookie": cookie,
+  });
+  if (r.status === 200 && r.body && !r.body.includes("Unauthorized")) {
+    return r.body.trim();
+  }
+  // fallback crumb endpoint
+  const r2 = await get("https://query2.finance.yahoo.com/v1/test/getcrumb", {
+    ...BASE_HEADERS,
+    "Accept": "text/plain, */*",
+    "Cookie": cookie,
+  });
+  return r2.body.trim();
 }
 
 exports.handler = async function (event) {
@@ -42,107 +62,113 @@ exports.handler = async function (event) {
   };
 
   try {
-    // ── 1. quote endpoint (preço, P/E, market cap, etc.) ──────────
-    const quoteData = await tryFetch(
-      `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${ticker}&fields=regularMarketPrice,regularMarketPreviousClose,regularMarketVolume,averageVolume,marketCap,trailingPE,forwardPE,priceToBook,fiftyTwoWeekHigh,fiftyTwoWeekLow,dividendYield,trailingAnnualDividendYield,dividendRate,beta,shortName,longName,sector,industry`
-    );
-    const q = quoteData?.quoteResponse?.result?.[0] || {};
+    // ── Obter cookie + crumb ──────────────────────────────────────
+    const cookie = await getCookie();
+    const crumb  = await getCrumb(cookie);
 
-    // ── 2. quoteSummary com módulos separados ─────────────────────
-    const hosts = ["query1", "query2"];
-    const moduleGroups = [
-      "financialData,defaultKeyStatistics",
-      "summaryDetail,assetProfile",
-    ];
+    const authHeaders = {
+      ...BASE_HEADERS,
+      "Accept": "application/json",
+      "Cookie": cookie,
+    };
 
-    const modules = {};
-    for (const host of hosts) {
-      for (const group of moduleGroups) {
-        const url = `https://${host}.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${encodeURIComponent(group)}&corsDomain=finance.yahoo.com`;
-        const data = await tryFetch(url);
-        const result = data?.quoteSummary?.result?.[0];
-        if (result) Object.assign(modules, result);
-      }
-      if (Object.keys(modules).length >= 3) break;
+    // ── Buscar dados fundamentais com crumb ───────────────────────
+    const modules = "price,summaryDetail,defaultKeyStatistics,financialData,assetProfile";
+    const summaryUrl = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=${encodeURIComponent(modules)}&crumb=${encodeURIComponent(crumb)}&formatted=false&corsDomain=finance.yahoo.com`;
+
+    const summaryRes = await get(summaryUrl, authHeaders);
+    let summary = null;
+    if (summaryRes.status === 200) {
+      try {
+        const parsed = JSON.parse(summaryRes.body);
+        summary = parsed?.quoteSummary?.result?.[0] || null;
+      } catch {}
     }
 
-    // ── 3. v8 chart para dados de preço confiáveis ────────────────
-    const chartData = await tryFetch(
-      `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`
-    );
-    const meta = chartData?.chart?.result?.[0]?.meta || {};
+    // ── Buscar quote (preço em tempo real) ────────────────────────
+    const quoteUrl = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(ticker)}&crumb=${encodeURIComponent(crumb)}&formatted=false`;
+    const quoteRes = await get(quoteUrl, authHeaders);
+    let q = {};
+    if (quoteRes.status === 200) {
+      try {
+        const parsed = JSON.parse(quoteRes.body);
+        q = parsed?.quoteResponse?.result?.[0] || {};
+      } catch {}
+    }
 
-    // ── Monta resposta unificada ───────────────────────────────────
-    const price = modules.price || {};
-    const summary = modules.summaryDetail || {};
-    const keyStats = modules.defaultKeyStatistics || {};
-    const finData = modules.financialData || {};
-    const profile = modules.assetProfile || {};
+    // ── Fallback: v8 chart para preço se quote falhou ─────────────
+    let meta = {};
+    if (!q.regularMarketPrice) {
+      const chartRes = await get(
+        `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=5d`,
+        authHeaders
+      );
+      if (chartRes.status === 200) {
+        try { meta = JSON.parse(chartRes.body)?.chart?.result?.[0]?.meta || {}; } catch {}
+      }
+    }
+
+    const p  = summary?.price             || {};
+    const sd = summary?.summaryDetail     || {};
+    const ks = summary?.defaultKeyStatistics || {};
+    const fd = summary?.financialData     || {};
+    const ap = summary?.assetProfile      || {};
 
     const unified = {
-      // Preço — prioriza quote endpoint que é mais confiável
-      regularMarketPrice:         q.regularMarketPrice         ?? meta.regularMarketPrice,
-      regularMarketPreviousClose: q.regularMarketPreviousClose ?? meta.chartPreviousClose,
-      regularMarketVolume:        q.regularMarketVolume        ?? meta.regularMarketVolume,
-      averageVolume:              q.averageVolume              ?? meta.regularMarketVolume,
-      marketCap:                  q.marketCap                  ?? meta.marketCap,
-      longName:                   q.longName || q.shortName    || meta.longName || ticker,
-      shortName:                  q.shortName                  || ticker,
-      fiftyTwoWeekHigh:           q.fiftyTwoWeekHigh           ?? meta.fiftyTwoWeekHigh,
-      fiftyTwoWeekLow:            q.fiftyTwoWeekLow            ?? meta.fiftyTwoWeekLow,
+      longName:    q.longName    || p.longName    || q.shortName || meta.longName || ticker,
+      shortName:   q.shortName   || p.shortName   || ticker,
+      sector:      q.sector      || ap.sector     || "",
+      industry:    q.industry    || ap.industry   || "",
+      longBusinessSummary: ap.longBusinessSummary || "",
 
-      // Valuation
-      trailingPE:     q.trailingPE     ?? summary.trailingPE?.raw,
-      forwardPE:      q.forwardPE      ?? summary.forwardPE?.raw,
-      priceToBook:    q.priceToBook    ?? keyStats.priceToBook?.raw,
-      pegRatio:       keyStats.pegRatio?.raw,
-      priceToSales:   summary.priceToSalesTrailing12Months?.raw ?? keyStats.priceToSalesTrailing12Months?.raw,
-      evToEbitda:     keyStats.enterpriseToEbitda?.raw,
-      enterpriseValue: keyStats.enterpriseValue?.raw,
+      regularMarketPrice:         q.regularMarketPrice         ?? p.regularMarketPrice         ?? meta.regularMarketPrice,
+      regularMarketPreviousClose: q.regularMarketPreviousClose ?? p.regularMarketPreviousClose ?? meta.chartPreviousClose,
+      regularMarketVolume:        q.regularMarketVolume        ?? p.regularMarketVolume        ?? meta.regularMarketVolume,
+      averageVolume:              q.averageVolume              ?? p.averageDailyVolume3Month   ?? meta.regularMarketVolume,
+      marketCap:                  q.marketCap                  ?? p.marketCap                 ?? meta.marketCap,
+      fiftyTwoWeekHigh:           q.fiftyTwoWeekHigh           ?? sd.fiftyTwoWeekHigh         ?? meta.fiftyTwoWeekHigh,
+      fiftyTwoWeekLow:            q.fiftyTwoWeekLow            ?? sd.fiftyTwoWeekLow          ?? meta.fiftyTwoWeekLow,
 
-      // Profitability
-      returnOnEquity:     finData.returnOnEquity?.raw,
-      returnOnAssets:     finData.returnOnAssets?.raw,
-      grossMargins:       finData.grossMargins?.raw,
-      operatingMargins:   finData.operatingMargins?.raw,
-      profitMargins:      finData.profitMargins?.raw ?? keyStats.profitMargins?.raw,
-      totalRevenue:       finData.totalRevenue?.raw,
+      trailingPE:      q.trailingPE     ?? sd.trailingPE,
+      forwardPE:       q.forwardPE      ?? sd.forwardPE,
+      pegRatio:        ks.pegRatio,
+      priceToBook:     q.priceToBook    ?? ks.priceToBook,
+      priceToSales:    sd.priceToSalesTrailing12Months,
+      evToEbitda:      ks.enterpriseToEbitda,
+      enterpriseValue: ks.enterpriseValue,
 
-      // Growth
-      revenueGrowth:  finData.revenueGrowth?.raw,
-      earningsGrowth: finData.earningsGrowth?.raw,
-      trailingEps:    keyStats.trailingEps?.raw,
-      forwardEps:     keyStats.forwardEps?.raw,
+      returnOnEquity:   fd.returnOnEquity,
+      returnOnAssets:   fd.returnOnAssets,
+      grossMargins:     fd.grossMargins,
+      operatingMargins: fd.operatingMargins,
+      profitMargins:    fd.profitMargins  ?? ks.profitMargins,
+      totalRevenue:     fd.totalRevenue,
 
-      // Dividends
-      dividendYield:   q.dividendYield ?? q.trailingAnnualDividendYield ?? summary.dividendYield?.raw ?? summary.trailingAnnualDividendYield?.raw,
-      dividendRate:    q.dividendRate  ?? summary.dividendRate?.raw,
-      payoutRatio:     summary.payoutRatio?.raw,
-      exDividendDate:  summary.exDividendDate?.fmt,
+      revenueGrowth:   fd.revenueGrowth,
+      earningsGrowth:  fd.earningsGrowth,
+      trailingEps:     q.epsTrailingTwelveMonths ?? ks.trailingEps,
+      forwardEps:      q.epsForward             ?? ks.forwardEps,
 
-      // Health
-      currentRatio:   finData.currentRatio?.raw,
-      quickRatio:     finData.quickRatio?.raw,
-      debtToEquity:   finData.debtToEquity?.raw,
-      totalDebt:      finData.totalDebt?.raw,
-      totalCash:      finData.totalCash?.raw,
+      dividendYield:   q.dividendYield ?? q.trailingAnnualDividendYield ?? sd.dividendYield ?? sd.trailingAnnualDividendYield,
+      dividendRate:    q.dividendRate  ?? sd.dividendRate,
+      payoutRatio:     sd.payoutRatio,
+      exDividendDate:  sd.exDividendDate?.fmt,
 
-      // Analyst
-      targetMeanPrice:  finData.targetMeanPrice?.raw,
-      targetLowPrice:   finData.targetLowPrice?.raw,
-      targetHighPrice:  finData.targetHighPrice?.raw,
-      recommendationKey: finData.recommendationKey,
-      numberOfAnalystOpinions: finData.numberOfAnalystOpinions?.raw,
+      currentRatio:    fd.currentRatio,
+      quickRatio:      fd.quickRatio,
+      debtToEquity:    fd.debtToEquity,
+      totalDebt:       fd.totalDebt,
+      totalCash:       fd.totalCash,
 
-      // Risk
-      beta:              q.beta ?? summary.beta?.raw ?? meta.beta,
-      shortPercentFloat: keyStats.shortPercentOfFloat?.raw,
-      shortRatio:        keyStats.shortRatio?.raw,
+      targetMeanPrice:  fd.targetMeanPrice,
+      targetLowPrice:   fd.targetLowPrice,
+      targetHighPrice:  fd.targetHighPrice,
+      recommendationKey: fd.recommendationKey,
+      numberOfAnalystOpinions: fd.numberOfAnalystOpinions,
 
-      // Profile
-      sector:   q.sector   || profile.sector   || "",
-      industry: q.industry || profile.industry || "",
-      longBusinessSummary: profile.longBusinessSummary || "",
+      beta:              q.beta ?? sd.beta ?? meta.beta,
+      shortPercentFloat: ks.shortPercentOfFloat,
+      shortRatio:        ks.shortRatio,
     };
 
     return {
