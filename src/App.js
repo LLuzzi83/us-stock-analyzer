@@ -322,7 +322,10 @@ export default function StockAnalyzer() {
   const fetchAnalysis = useCallback(async (sym) => {
     const text   = await callClaude(apiKey, buildPrompt(sym));
     const parsed = parseAnalysis(text);
-    if (!parsed) throw new Error("Não foi possível estruturar os dados. Tente novamente.");
+    if (!parsed) {
+      // Mostra os primeiros 300 chars da resposta para debug
+      throw new Error("Não foi possível estruturar os dados. Resposta recebida: " + (text || "vazia").slice(0, 300));
+    }
     return parsed;
   }, [apiKey]);
 
