@@ -35,38 +35,15 @@ function fmtCurrency(v) {
 
 // ── Yahoo Finance via proxy ───────────────────────────────────────
 async function fetchYahooData(ticker) {
-  const modules = "price,summaryDetail,defaultKeyStatistics,financialData,assetProfile";
-  const yahooUrl = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=${modules}`;
-
-  // Lista de proxies CORS — tenta cada um em ordem
-  const proxies = [
-    `https://corsproxy.io/?${encodeURIComponent(yahooUrl)}`,
-    `https://api.allorigins.win/get?url=${encodeURIComponent(yahooUrl)}`,
-    `https://thingproxy.freeboard.io/fetch/${yahooUrl}`,
-  ];
-
-  let lastError = null;
-  for (const proxy of proxies) {
-    try {
-      const res = await fetch(proxy, { signal: AbortSignal.timeout(10000) });
-      if (!res.ok) continue;
-      const text = await res.text();
-      // allorigins envolve em { contents: "..." }, os outros retornam JSON direto
-      let parsed;
-      try { parsed = JSON.parse(text); } catch { continue; }
-      // allorigins wrapper
-      if (parsed.contents) {
-        try { parsed = JSON.parse(parsed.contents); } catch { continue; }
-      }
-      if (parsed.quoteSummary?.error) throw new Error("Ticker não encontrado: " + ticker);
-      const r = parsed.quoteSummary?.result?.[0];
-      if (r) return r;
-    } catch(e) {
-      lastError = e;
-      continue;
-    }
-  }
-  throw new Error(lastError?.message || "Não foi possível buscar dados. Verifique o ticker e tente novamente.");
+  // Chama a Netlify Function local — sem problemas de CORS
+  const res = await fetch(`/api/yahoo?ticker=${encodeURIComponent(ticker)}`, {
+    signal: AbortSignal.timeout(15000),
+  });
+  const json = await res.json();
+  if (!res.ok || json.error) throw new Error(json.error || "Erro ao buscar dados");
+  const r = json.quoteSummary?.result?.[0];
+  if (!r) throw new Error("Sem dados para " + ticker);
+  return r;
 }
 
 function extractMetrics(r) {
