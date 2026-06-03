@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 
-const STORAGE_KEY_FAVS   = "stock_favorites_v2";
+const STORAGE_KEY_FAVS   = "stock_favorites_v3";
+const STORAGE_KEY_FMPKEY = "fmp_api_key";
 const STORAGE_KEY_APIKEY = "gemini_api_key";
 
 const REC_COLOR = {
@@ -34,10 +35,11 @@ function fmtCurrency(v) {
 }
 
 // ── Yahoo Finance via proxy ───────────────────────────────────────
-async function fetchYahooData(ticker) {
+async function fetchYahooData(ticker, fmpKey) {
+  const params = `ticker=${encodeURIComponent(ticker)}&fmpkey=${encodeURIComponent(fmpKey)}`;
   const endpoints = [
-    `/api/yahoo?ticker=${encodeURIComponent(ticker)}`,
-    `/.netlify/functions/yahoo?ticker=${encodeURIComponent(ticker)}`,
+    `/api/yahoo?${params}`,
+    `/.netlify/functions/yahoo?${params}`,
   ];
   let lastErr = "";
   for (const endpoint of endpoints) {
@@ -315,6 +317,74 @@ function FavoritesPanel({ favorites, refreshingTickers, onSelect, onRemove, onRe
   );
 }
 
+
+// ── Settings Panel ────────────────────────────────────────────────
+function SettingsPanel({ apiKey, onChangeApiKey, onClose }) {
+  const [fmpKey, setFmpKey] = useState(() => localStorage.getItem("fmp_api_key") || "");
+  const [fmpInput, setFmpInput] = useState(fmpKey);
+  const [saved, setSaved] = useState(false);
+
+  const saveFmp = () => {
+    localStorage.setItem("fmp_api_key", fmpInput.trim());
+    setFmpKey(fmpInput.trim());
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  return (
+    <div style={{ background:"#0d1b2a", border:"1px solid #1e3a5a", borderRadius:14, padding:"20px 24px", marginBottom:20, animation:"fadeIn 0.2s ease" }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
+        <div style={{ color:"#4fc3f7", fontSize:12, fontWeight:700, letterSpacing:2, textTransform:"uppercase" }}>⚙ Configurações</div>
+        <button onClick={onClose} style={{ background:"none", border:"none", color:"#4a6a8a", fontSize:20, cursor:"pointer" }}>×</button>
+      </div>
+
+      {/* Gemini Key */}
+      <div style={{ marginBottom:16 }}>
+        <div style={{ color:"#a8c0d6", fontSize:11, fontWeight:700, letterSpacing:1, textTransform:"uppercase", marginBottom:8 }}>Google Gemini (análise IA)</div>
+        <div style={{ display:"flex", gap:10, alignItems:"center" }}>
+          <div style={{ flex:1, background:"#060d14", border:"1px solid #1e2d3d", borderRadius:8, padding:"10px 14px", color:"#4a6a8a", fontSize:13, fontFamily:"'IBM Plex Mono',monospace" }}>
+            {apiKey.slice(0,8)}••••••••
+          </div>
+          <button onClick={onChangeApiKey} style={{ background:"#ff4d6d22", border:"1px solid #ff4d6d44", borderRadius:8, padding:"10px 16px", color:"#ff4d6d", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"'IBM Plex Sans',sans-serif", whiteSpace:"nowrap" }}>
+            Trocar
+          </button>
+        </div>
+      </div>
+
+      {/* FMP Key */}
+      <div>
+        <div style={{ color:"#a8c0d6", fontSize:11, fontWeight:700, letterSpacing:1, textTransform:"uppercase", marginBottom:8 }}>
+          Financial Modeling Prep — dados fundamentais
+          {!fmpKey && <span style={{ color:"#ff4d6d", marginLeft:8 }}>⚠ necessário</span>}
+          {fmpKey  && <span style={{ color:"#00d68f", marginLeft:8 }}>✓ configurado</span>}
+        </div>
+        <div style={{ display:"flex", gap:10, alignItems:"center" }}>
+          <input
+            value={fmpInput}
+            onChange={e => setFmpInput(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && saveFmp()}
+            placeholder="Cole sua chave FMP aqui..."
+            style={{ flex:1, background:"#060d14", border:"1px solid #1e2d3d", borderRadius:8, padding:"10px 14px", color:"#e2f0ff", fontSize:13, fontFamily:"'IBM Plex Mono',monospace" }}
+          />
+          <button onClick={saveFmp} style={{ background: saved ? "#00d68f22" : "linear-gradient(135deg,#1a73e8,#4fc3f7)", border: saved ? "1px solid #00d68f" : "none", borderRadius:8, padding:"10px 16px", color:"#fff", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"'IBM Plex Sans',sans-serif", whiteSpace:"nowrap" }}>
+            {saved ? "✓ Salvo!" : "Salvar"}
+          </button>
+        </div>
+        <div style={{ marginTop:10, padding:"10px 14px", background:"#060d14", borderRadius:8, border:"1px solid #1e2d3d" }}>
+          <div style={{ color:"#4fc3f7", fontSize:11, fontWeight:700, letterSpacing:1, marginBottom:6 }}>COMO OBTER — GRATUITO</div>
+          <ol style={{ color:"#7a9ab8", fontSize:12, margin:0, paddingLeft:16, lineHeight:2 }}>
+            <li>Acesse <a href="https://financialmodelingprep.com/developer/docs" target="_blank" rel="noreferrer" style={{ color:"#4fc3f7" }}>financialmodelingprep.com</a></li>
+            <li>Clique em <strong style={{ color:"#e2f0ff" }}>Get Free API Key</strong></li>
+            <li>Crie conta — sem cartão de crédito</li>
+            <li>Copie a chave e cole acima</li>
+          </ol>
+          <div style={{ marginTop:8, color:"#00d68f", fontSize:11 }}>✓ 250 requisições/dia grátis · P/E, ROE, margens, dividendos, dívida e mais</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main App ──────────────────────────────────────────────────────
 export default function StockAnalyzer() {
   const [apiKey, setApiKey]       = useState(() => localStorage.getItem(STORAGE_KEY_APIKEY) || "");
@@ -337,7 +407,8 @@ export default function StockAnalyzer() {
   const fetchAll = useCallback(async (sym) => {
     // Step 1: real-time data from Yahoo Finance
     setLoadingStep("Buscando cotações em tempo real (Yahoo Finance)...");
-    const yahooRaw = await fetchYahooData(sym);
+    const fmpKey = localStorage.getItem(STORAGE_KEY_FMPKEY) || "";
+    const yahooRaw = await fetchYahooData(sym, fmpKey);
     const metrics  = extractMetrics(yahooRaw);
 
     // Step 2: qualitative analysis from Gemini
@@ -439,17 +510,11 @@ export default function StockAnalyzer() {
 
         {/* Settings */}
         {showSettings && (
-          <div style={{ background:"#0d1b2a", border:"1px solid #1e3a5a", borderRadius:14, padding:"20px 24px", marginBottom:20, animation:"fadeIn 0.2s ease" }}>
-            <div style={{ color:"#4fc3f7", fontSize:12, fontWeight:700, letterSpacing:2, textTransform:"uppercase", marginBottom:14 }}>⚙ Configurações</div>
-            <div style={{ display:"flex", gap:10, alignItems:"center" }}>
-              <div style={{ flex:1, background:"#060d14", border:"1px solid #1e3a5a", borderRadius:8, padding:"10px 14px", color:"#4a6a8a", fontSize:13, fontFamily:"'IBM Plex Mono',monospace" }}>
-                Chave Gemini: {apiKey.slice(0,8)}••••••••
-              </div>
-              <button onClick={()=>{ localStorage.removeItem(STORAGE_KEY_APIKEY); setApiKey(""); setShowSettings(false); }} style={{ background:"#ff4d6d22", border:"1px solid #ff4d6d44", borderRadius:8, padding:"10px 16px", color:"#ff4d6d", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"'IBM Plex Sans',sans-serif" }}>
-                Trocar Chave
-              </button>
-            </div>
-          </div>
+          <SettingsPanel
+            apiKey={apiKey}
+            onChangeApiKey={()=>{ localStorage.removeItem(STORAGE_KEY_APIKEY); setApiKey(""); setShowSettings(false); }}
+            onClose={()=>setShowSettings(false)}
+          />
         )}
 
         {/* Search */}
