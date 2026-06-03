@@ -57,9 +57,11 @@ function parseAnalysis(text) {
 
 function buildPrompt(sym) {
   const today = new Date().toLocaleDateString("pt-BR", { day:"2-digit", month:"short", year:"numeric" });
-  return `Analise a ação ${sym} (${today}) e retorne APENAS JSON válido:
-{"ticker":"${sym}","company":"","sector":"","industry":"","description":"","price":"","market_cap":"","last_updated":"${today}","scores":{"valuation":0,"health":0,"growth":0,"dividends":0,"overall":0},"metrics":{"pe":"","forward_pe":"","peg":"","pb":"","ps":"","price_fcf":"","ev_ebitda":"","ev_fcf":"","roe":"","roic":"","roa":"","asset_turnover":"","interest_coverage":"","altman_z":"","gross_margin":"","op_margin":"","net_margin":"","fcf_yield":"","dy":"","div_cagr_5y":"","div_years":"","buyback_yield":"","total_shareholder_yield":"","payout":"","revenue_growth":"","eps_growth":"","earnings_surprise":"","debt_equity":"","current_ratio":"","quick_ratio":"","total_debt":"","total_cash":"","analyst_target":"","analyst_low":"","analyst_high":"","analyst_consensus":"","analyst_count":"","beta":"","short_interest":"","week52_high":"","week52_low":"","eps_ttm":"","eps_forward":"","revenue_ttm":"","ex_div_date":""},"fair_value":{"method":"","estimate":"","current_vs_fair":"","upside":""},"strengths":["","",""],"risks":["","",""],"dividend_history":"","moat":"","outlook":"","recommendation":"COMPRAR","recommendation_reason":""}`;
+  const time  = new Date().toLocaleTimeString("pt-BR", { hour:"2-digit", minute:"2-digit" });
+  return `Busque dados atuais de ${sym} e retorne APENAS este JSON preenchido (sem texto extra):
+{"ticker":"${sym}","company":"","sector":"","industry":"","description":"","price":"","price_time":"${time} BRT","market_cap":"","last_updated":"${today}","scores":{"valuation":0,"health":0,"growth":0,"dividends":0,"overall":0},"metrics":{"pe":"","forward_pe":"","peg":"","pb":"","ps":"","ev_ebitda":"","roe":"","roic":"","net_margin":"","gross_margin":"","dy":"","div_years":"","payout":"","revenue_growth":"","eps_growth":"","debt_equity":"","current_ratio":"","beta":"","analyst_target":"","analyst_consensus":"","week52_high":"","week52_low":"","eps_ttm":""},"fair_value":{"method":"","estimate":"","upside":""},"strengths":["","",""],"risks":["","",""],"moat":"","outlook":"","recommendation":"","recommendation_reason":""}`;
 }
+
 
 async function callClaude(apiKey, prompt) {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -71,7 +73,7 @@ async function callClaude(apiKey, prompt) {
       "anthropic-dangerous-direct-browser-access": "true",
     },
     body: JSON.stringify({
-      model: "claude-sonnet-4-5",
+      model: "claude-haiku-4-5",
       max_tokens: 2000,
       tools: [{ type: "web_search_20250305", name: "web_search" }],
       messages: [{ role: "user", content: prompt }],
@@ -282,6 +284,7 @@ export default function StockAnalyzer() {
   if (!apiKey) return <ApiKeySetup onSave={setApiKey} />;
 
   const m = data?.metrics || {};
+        const priceTime = data?.price_time || "";
   const tabs = ["overview","valuation","dividendos","risco","perspectiva"];
 
   return (
@@ -385,35 +388,72 @@ export default function StockAnalyzer() {
         {data && (
           <div style={{ animation:"popIn 0.25s ease" }}>
             {/* Company Header */}
-            <div style={{ background:"linear-gradient(135deg,#0d1b2a,#0a2236)", border:"1px solid #1e3a5a", borderRadius:14, padding:"24px 28px", marginBottom:16, display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:16 }}>
-              <div>
-                <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:6, flexWrap:"wrap" }}>
-                  <span style={{ fontSize:28, fontWeight:700, fontFamily:"'IBM Plex Mono',monospace", color:"#a78bfa" }}>{data.ticker}</span>
-                  {data.recommendation && (
-                    <span style={{ background:(REC_COLOR[data.recommendation]||"#888")+"22", color:REC_COLOR[data.recommendation]||"#888", border:`1px solid ${(REC_COLOR[data.recommendation]||"#888")}44`, borderRadius:6, padding:"3px 12px", fontWeight:700, fontSize:12, letterSpacing:1 }}>{data.recommendation}</span>
-                  )}
-                  {data.last_updated && <span style={{ color:"#2a4a6a", fontSize:11, fontFamily:"'IBM Plex Mono',monospace" }}>· {data.last_updated}</span>}
-                </div>
-                <div style={{ color:"#e2f0ff", fontWeight:600, fontSize:18, marginBottom:4 }}>{data.company}</div>
-                <div style={{ color:"#4a6a8a", fontSize:13 }}>{data.sector} · {data.industry}</div>
-                <div style={{ color:"#7a9ab8", fontSize:13, marginTop:8, maxWidth:440, lineHeight:1.5 }}>{data.description}</div>
-                <button onClick={toggleFavorite} style={{ marginTop:14, background:isFavorited?"#ffaa0022":"transparent", border:`1px solid ${isFavorited?"#ffaa00":"#1e3a5a"}`, borderRadius:8, padding:"6px 16px", color:isFavorited?"#ffaa00":"#4a6a8a", fontSize:12, fontWeight:700, cursor:"pointer", letterSpacing:1, fontFamily:"'IBM Plex Sans',sans-serif", display:"inline-flex", alignItems:"center", gap:6, transition:"all 0.2s" }}>
-                  {favSaved ? <><span>✓</span>Salvo!</> : isFavorited ? <><span>★</span>Nos Favoritos</> : <><span>☆</span>Salvar nos Favoritos</>}
-                </button>
-              </div>
-              <div style={{ textAlign:"right" }}>
-                <div style={{ color:"#e2f0ff", fontSize:28, fontWeight:700, fontFamily:"'IBM Plex Mono',monospace" }}>{data.price}</div>
-                <div style={{ color:"#4a6a8a", fontSize:12, marginTop:2 }}>Market Cap: {data.market_cap}</div>
-                {m.week52_high && <div style={{ color:"#4a6a8a", fontSize:11, marginTop:2 }}>52w: {m.week52_low} – {m.week52_high}</div>}
-                {data.fair_value?.upside && (
-                  <div style={{ color:data.fair_value.upside.startsWith("+")?"#00d68f":"#ff4d6d", fontWeight:700, fontSize:14, marginTop:6, fontFamily:"'IBM Plex Mono',monospace" }}>
-                    Upside: {data.fair_value.upside}
+            {(() => {
+              // Parse numeric price and targets for calculations
+              const priceNum  = parseFloat((data.price||"").replace(/[^0-9.]/g,"")) || null;
+              const fairLow   = parseFloat((data.fair_value?.estimate||"").replace(/[^0-9.]/g,"")) || null;
+              const fairHigh  = parseFloat((data.fair_value?.estimate||"").split("–")[1]?.replace(/[^0-9.]/g,"")) || fairLow;
+              const fairMid   = fairLow && fairHigh ? (fairLow + fairHigh) / 2 : fairLow;
+              const tgtNum    = parseFloat((m.analyst_target||"").replace(/[^0-9.]/g,"")) || null;
+              const ceilPrice = fairMid ? fairMid * 0.80 : null; // 20% margin of safety
+              const vsJusto   = priceNum && fairMid  ? ((priceNum - fairMid)  / fairMid  * 100) : null;
+              const vsAlvo    = priceNum && tgtNum   ? ((priceNum - tgtNum)   / tgtNum   * 100) : null;
+              const vsTeto    = priceNum && ceilPrice? ((priceNum - ceilPrice)/ ceilPrice* 100) : null;
+
+              const pctColor = (v) => v === null ? "#4a6a8a" : v <= -10 ? "#00d68f" : v <= 0 ? "#7cc987" : v <= 10 ? "#ffaa00" : "#ff4d6d";
+              const pctLabel = (v, prefix="vs") => v === null ? "N/A" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
+
+              return (
+                <div style={{ background:"linear-gradient(135deg,#0d1b2a,#0a2236)", border:"1px solid #1e3a5a", borderRadius:14, padding:"24px 28px", marginBottom:16 }}>
+                  {/* Top row */}
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:16, marginBottom:20 }}>
+                    <div>
+                      <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:6, flexWrap:"wrap" }}>
+                        <span style={{ fontSize:28, fontWeight:700, fontFamily:"'IBM Plex Mono',monospace", color:"#a78bfa" }}>{data.ticker}</span>
+                        {data.recommendation && (
+                          <span style={{ background:(REC_COLOR[data.recommendation]||"#888")+"22", color:REC_COLOR[data.recommendation]||"#888", border:`1px solid ${(REC_COLOR[data.recommendation]||"#888")}44`, borderRadius:6, padding:"3px 12px", fontWeight:700, fontSize:12, letterSpacing:1 }}>{data.recommendation}</span>
+                        )}
+                        {data.last_updated && <span style={{ color:"#2a4a6a", fontSize:11, fontFamily:"'IBM Plex Mono',monospace" }}>· {data.last_updated}</span>}
+                      </div>
+                      <div style={{ color:"#e2f0ff", fontWeight:600, fontSize:18, marginBottom:4 }}>{data.company}</div>
+                      <div style={{ color:"#4a6a8a", fontSize:13 }}>{data.sector} · {data.industry}</div>
+                      <div style={{ color:"#7a9ab8", fontSize:13, marginTop:8, maxWidth:440, lineHeight:1.5 }}>{data.description}</div>
+                      <button onClick={toggleFavorite} style={{ marginTop:14, background:isFavorited?"#ffaa0022":"transparent", border:`1px solid ${isFavorited?"#ffaa00":"#1e3a5a"}`, borderRadius:8, padding:"6px 16px", color:isFavorited?"#ffaa00":"#4a6a8a", fontSize:12, fontWeight:700, cursor:"pointer", letterSpacing:1, fontFamily:"'IBM Plex Sans',sans-serif", display:"inline-flex", alignItems:"center", gap:6 }}>
+                        {favSaved ? <><span>✓</span>Salvo!</> : isFavorited ? <><span>★</span>Nos Favoritos</> : <><span>☆</span>Salvar nos Favoritos</>}
+                      </button>
+                    </div>
+                    <div style={{ textAlign:"right" }}>
+                      <div style={{ color:"#e2f0ff", fontSize:32, fontWeight:700, fontFamily:"'IBM Plex Mono',monospace", lineHeight:1 }}>{data.price}</div>
+                      {data.price_time && <div style={{ color:"#2a4a6a", fontSize:11, fontFamily:"'IBM Plex Mono',monospace", marginTop:4 }}>🕐 {data.price_time}</div>}
+                      <div style={{ color:"#4a6a8a", fontSize:12, marginTop:6 }}>Market Cap: {data.market_cap}</div>
+                      {m.week52_high && <div style={{ color:"#4a6a8a", fontSize:11, marginTop:2 }}>52w: {m.week52_low} – {m.week52_high}</div>}
+                      {m.analyst_consensus && <div style={{ color:"#4a6a8a", fontSize:11, marginTop:4 }}>{m.analyst_consensus}</div>}
+                    </div>
                   </div>
-                )}
-                {m.analyst_target && <div style={{ color:"#a8c0d6", fontSize:12, marginTop:4 }}>Alvo analistas: {m.analyst_target}</div>}
-                {m.analyst_consensus && <div style={{ color:"#4a6a8a", fontSize:11, marginTop:2 }}>{m.analyst_consensus}</div>}
-              </div>
-            </div>
+
+                  {/* Highlights row */}
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8 }}>
+                    {[
+                      { label:"Valor Justo",    value: fairMid   ? `$${fairMid.toFixed(2)}`   : data.fair_value?.estimate || "N/A", pct: vsJusto,  sub:"Estimativa IA" },
+                      { label:"Preço Teto",     value: ceilPrice ? `$${ceilPrice.toFixed(2)}` : "N/A",                              pct: vsTeto,   sub:"Margem 20%" },
+                      { label:"Alvo Analistas", value: m.analyst_target || "N/A",                                                   pct: vsAlvo,   sub:"Consenso mercado" },
+                      { label:"Upside IA",      value: data.fair_value?.upside || "N/A",                                           pct: vsJusto,  sub:data.fair_value?.method || "" },
+                    ].map(({ label, value, pct, sub }) => (
+                      <div key={label} style={{ background:"#060d14", border:"1px solid #1e2d3d", borderRadius:10, padding:"12px 14px" }}>
+                        <div style={{ color:"#4a6a8a", fontSize:10, letterSpacing:1, textTransform:"uppercase", marginBottom:6 }}>{label}</div>
+                        <div style={{ color:"#e2f0ff", fontWeight:700, fontSize:15, fontFamily:"'IBM Plex Mono',monospace" }}>{value}</div>
+                        {pct !== null && (
+                          <div style={{ color:pctColor(pct), fontSize:12, fontWeight:700, marginTop:4, fontFamily:"'IBM Plex Mono',monospace" }}>
+                            {pct >= 0 ? "▲" : "▼"} {Math.abs(pct).toFixed(1)}% vs atual
+                          </div>
+                        )}
+                        <div style={{ color:"#2a4a6a", fontSize:10, marginTop:2 }}>{sub}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Score Cards */}
             {data.scores && (
@@ -470,12 +510,11 @@ export default function StockAnalyzer() {
                 <Section title="Múltiplos de Preço" icon="$">
                   <MetricRow label="P/L (P/E)"        value={m.pe}          desc="Preço / Lucro TTM"/>
                   <MetricRow label="Forward P/E"      value={m.forward_pe}  desc="P/E estimado próx. 12m"/>
-                  <MetricRow label="PEG Ratio"        value={m.peg}         desc="P/E ÷ Crescimento"/>
-                  <MetricRow label="P/VP (P/B)"       value={m.pb}          desc="Preço / Valor Patrimonial"/>
+                  <MetricRow label="PEG Ratio"        value={m.peg}         desc="P/E ÷ Crescimento — <1 barato"/>
+                  <MetricRow label="P/VP (P/B)"       value={m.pb}          desc="Preço / Valor Patrimonial — <1 abaixo do book"/>
                   <MetricRow label="P/S"              value={m.ps}          desc="Preço / Receita"/>
                   <MetricRow label="P/FCF"            value={m.price_fcf}   desc="Preço / Fluxo de Caixa Livre"/>
                   <MetricRow label="EV/EBITDA"        value={m.ev_ebitda}   desc="Enterprise Value / EBITDA"/>
-                  <MetricRow label="EV/FCF"           value={m.ev_fcf}      desc="Enterprise Value / FCF"/>
                 </Section>
                 <Section title="Rentabilidade & Margens" icon="◈">
                   <MetricRow label="ROE"              value={m.roe}         desc="Retorno sobre Patrimônio"/>
